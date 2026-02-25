@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>💰 가계부</title>
+  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="icon" href="icon.png">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #fafafa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    input, select, button { font-family: inherit; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const DEFAULT_EXP_CATS = ["식비","교통","쇼핑","의료","문화/여가","기타"];
+    const DEFAULT_INC_CATS = ["급여","부업","용돈","기타수입"];
+    const COLORS = ["#6366f1","#f59e0b","#10b981","#ef4444","#3b82f6","#ec4899","#8b5cf6","#14b8a6","#f97316","#a3e635"];
+
+    const today = () => new Date().toISOString().split("T")[0];
+    const fmt = n => n.toLocaleString("ko-KR") + "원";
+    const fmtNum = n => n === "" ? "" : Number(String(n).replace(/,/g,"")).toLocaleString("ko-KR");
+    const lbl = { display:"block", fontSize:13, color:"#888", marginBottom:6, fontWeight:500 };
+    const inp = { width:"100%", padding:"12px 14px", border:"1px solid #e8e8e8", borderRadius:10, fontSize:15, background:"#fff", boxSizing:"border-box", outline:"none" };
+
+    function load(key, fallback) {
+      try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+    }
+    function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
+
+    // 확인 모달
+    function ConfirmModal({ msg, onConfirm, onCancel, confirmLabel="추가", confirmColor="#6366f1" }) {
+      return (
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.45)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+          <div style={{background:"#fff",borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:360,boxShadow:"0 8px 32px rgba(0,0,0,0.18)"}}>
+            <div style={{fontSize:16,fontWeight:600,color:"#111",marginBottom:24,lineHeight:1.6,textAlign:"center"}}>{msg}</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={onCancel} style={{flex:1,padding:"13px",border:"1px solid #e8e8e8",borderRadius:12,background:"#fff",color:"#888",fontWeight:600,fontSize:15,cursor:"pointer"}}>취소</button>
+              <button onClick={onConfirm} style={{flex:1,padding:"13px",border:"none",borderRadius:12,background:confirmColor,color:"#fff",fontWeight:700,fontSize:15,cursor:"pointer"}}>{confirmLabel}</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 수정 모달
+    function EditModal({ entry, expCats, incCats, excludedCats, onSave, onCancel }) {
+      const [form, setForm] = useState({ ...entry, amount: fmtNum(entry.amount) });
+      const cats = form.type === "expense" ? expCats : incCats;
+      const rawAmount = Number(String(form.amount).replace(/,/g,""));
+      const valid = form.category && form.amount && !isNaN(rawAmount) && rawAmount > 0;
+
+      const handleAmount = e => {
+        const raw = e.target.value.replace(/,/g,"");
+        if (raw === "" || /^\d+$/.test(raw)) setForm(f => ({...f, amount: fmtNum(raw)}));
+      };
+
+      return (
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.45)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+          <div style={{background:"#fff",borderRadius:"20px 20px 0 0",padding:"24px 20px 40px",width:"100%",maxWidth:430,boxShadow:"0 -4px 24px rgba(0,0,0,0.12)"}}>
+            <div style={{fontWeight:700,fontSize:17,marginBottom:20,textAlign:"center"}}>내역 수정</div>
+            <div style={{display:"flex",background:"#f0f0f0",borderRadius:10,padding:3,marginBottom:14}}>
+              {[["expense","지출"],["income","수입"]].map(([k,l])=>(
+                <button key={k} onClick={()=>setForm(f=>({...f,type:k,category:""}))} style={{flex:1,padding:"9px 0",border:"none",borderRadius:8,background:form.type===k?"#fff":"transparent",color:form.type===k?k==="expense"?"#ef4444":"#10b981":"#888",fontWeight:form.type===k?700:400,fontSize:15,cursor:"pointer",boxShadow:form.type===k?"0 1px 4px rgba(0,0,0,0.1)":"none"}}>{l}</button>
+              ))}
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div><label style={lbl}>날짜</label><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/></div>
+              <div><label style={lbl}>카테고리</label>
+                <select value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))} style={inp}>
+                  <option value="">선택하세요</option>
+                  {cats.map(c=><option key={c} value={c}>{c}{excludedCats.includes(c)?" (집계 제외)":""}</option>)}
+                </select>
+              </div>
+              <div><label style={lbl}>금액 (원)</label><input type="text" inputMode="numeric" placeholder="0" value={form.amount} onChange={handleAmount} style={inp}/></div>
+              <div><label style={lbl}>메모 (선택)</label><input type="text" placeholder="내용을 입력하세요" value={form.memo} onChange={e=>setForm(f=>({...f,memo:e.target.value}))} style={inp}/></div>
+            </div>
+            <div style={{display:"flex",gap:10,marginTop:20}}>
+              <button onClick={onCancel} style={{flex:1,padding:"13px",border:"1px solid #e8e8e8",borderRadius:12,background:"#fff",color:"#888",fontWeight:600,fontSize:15,cursor:"pointer"}}>취소</button>
+              <button onClick={()=>valid&&onSave({...form,amount:rawAmount})} style={{flex:1,padding:"13px",border:"none",borderRadius:12,background:valid?"#6366f1":"#ccc",color:"#fff",fontWeight:700,fontSize:15,cursor:valid?"pointer":"not-allowed"}}>저장</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 파이차트
+    function PieChart({ data }) {
+      const ref = useRef();
+      useEffect(() => {
+        const canvas = ref.current; if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        const W = canvas.width, H = canvas.height, cx = W/2, cy = H/2, r = Math.min(W,H)/2 - 10;
+        ctx.clearRect(0,0,W,H);
+        const total = data.reduce((s,d)=>s+d.value,0); if (!total) return;
+        let angle = -Math.PI/2;
+        data.forEach(d => {
+          const slice = (d.value/total)*Math.PI*2;
+          ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,r,angle,angle+slice); ctx.closePath();
+          ctx.fillStyle=d.color; ctx.fill(); ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke();
+          const pct = Math.round((d.value/total)*100);
+          if (pct >= 5) {
+            const mid = angle+slice/2, lx=cx+Math.cos(mid)*r*0.65, ly=cy+Math.sin(mid)*r*0.65;
+            ctx.fillStyle="#fff"; ctx.font="bold 13px system-ui,sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+            ctx.fillText(pct+"%",lx,ly);
+          }
+          angle+=slice;
+        });
+      }, [data]);
+      return <canvas ref={ref} width={280} height={280} style={{display:"block",margin:"0 auto"}}/>;
+    }
+
+    function roundRect(ctx,x,y,w,h,r,fill){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();if(fill){ctx.fillStyle=fill;ctx.fill();}}
+
+    function drawAndDownload(range, entries, excludedCats) {
+      const filtered=entries.filter(e=>e.date>=range.start&&e.date<=range.end).sort((a,b)=>b.date.localeCompare(a.date));
+      const incList=filtered.filter(e=>e.type==="income"), expList=filtered.filter(e=>e.type==="expense");
+      const totalI=incList.reduce((s,e)=>s+e.amount,0);
+      const totalE=expList.filter(e=>!excludedCats.includes(e.category)).reduce((s,e)=>s+e.amount,0);
+      const bal=totalI-totalE, excTotal=expList.filter(e=>excludedCats.includes(e.category)).reduce((s,e)=>s+e.amount,0);
+      const W=750,ROW=52,HEADER=200,SECTION=44,PAD=28;
+      const H=HEADER+(filtered.length>0?(incList.length+expList.length+4)*ROW+SECTION*2+60:100)+PAD*2;
+      const canvas=document.createElement("canvas"); canvas.width=W; canvas.height=Math.max(H,400);
+      const ctx=canvas.getContext("2d");
+      ctx.fillStyle="#f8f8fc"; ctx.fillRect(0,0,W,canvas.height);
+      const grad=ctx.createLinearGradient(0,0,W,0); grad.addColorStop(0,"#6366f1"); grad.addColorStop(1,"#818cf8");
+      roundRect(ctx,PAD,PAD,W-PAD*2,160,20,grad);
+      ctx.fillStyle="#fff"; ctx.font="bold 22px system-ui,sans-serif"; ctx.textAlign="left"; ctx.fillText("💰 가계부 내역",PAD+20,PAD+38);
+      ctx.font="15px system-ui,sans-serif"; ctx.fillStyle="rgba(255,255,255,0.85)"; ctx.fillText(`${range.start} ~ ${range.end}`,PAD+20,PAD+64);
+      ctx.font="13px system-ui,sans-serif"; ctx.fillStyle="rgba(255,255,255,0.75)"; ctx.fillText("총 수입",PAD+20,PAD+96); ctx.fillText("총 지출",W/2,PAD+96);
+      ctx.font="bold 22px system-ui,sans-serif"; ctx.fillStyle="#fff"; ctx.fillText(fmt(totalI),PAD+20,PAD+124); ctx.fillText(fmt(totalE),W/2,PAD+124);
+      roundRect(ctx,PAD+16,PAD+136,W-PAD*2-32,36,10,"rgba(255,255,255,0.18)");
+      ctx.font="13px system-ui,sans-serif"; ctx.fillStyle="rgba(255,255,255,0.9)"; ctx.fillText("잔액",PAD+30,PAD+158);
+      ctx.font="bold 18px system-ui,sans-serif"; ctx.fillStyle=bal>=0?"#a7f3d0":"#fca5a5";
+      const balText=(bal>=0?"+":"")+fmt(bal); ctx.textAlign="right"; ctx.fillText(balText,W-PAD-20,PAD+158); ctx.textAlign="left";
+      let y=PAD+180;
+      const drawSection=(label,list,typeColor)=>{
+        if(!list.length)return;
+        roundRect(ctx,PAD,y,W-PAD*2,SECTION,10,"#f0f0f0");
+        ctx.font="bold 15px system-ui,sans-serif"; ctx.fillStyle=typeColor; ctx.fillText(label,PAD+16,y+28); y+=SECTION+6;
+        list.forEach(e=>{
+          const isExc=excludedCats.includes(e.category);
+          roundRect(ctx,PAD,y,W-PAD*2,ROW-4,12,"#fff");
+          roundRect(ctx,PAD+12,y+12,72,24,8,typeColor+"22");
+          ctx.font="bold 12px system-ui,sans-serif"; ctx.fillStyle=typeColor; ctx.fillText(e.category.slice(0,5),PAD+18,y+29);
+          if(isExc){roundRect(ctx,PAD+90,y+12,68,24,8,"#eee");ctx.font="11px system-ui,sans-serif";ctx.fillStyle="#aaa";ctx.fillText("집계 제외",PAD+96,y+29);}
+          ctx.font="13px system-ui,sans-serif"; ctx.fillStyle="#aaa"; ctx.fillText(e.date,PAD+170,y+29);
+          if(e.memo){ctx.fillStyle="#666";ctx.fillText(e.memo.slice(0,18),PAD+270,y+29);}
+          const amtTxt=(e.type==="expense"?"-":"+")+e.amount.toLocaleString("ko-KR")+"원";
+          ctx.font="bold 16px system-ui,sans-serif"; ctx.fillStyle=isExc?"#bbb":typeColor;
+          ctx.textAlign="right"; ctx.fillText(amtTxt,W-PAD-16,y+30); ctx.textAlign="left"; y+=ROW;
+        }); y+=10;
+      };
+      if(!filtered.length){ctx.font="16px system-ui,sans-serif";ctx.fillStyle="#bbb";ctx.textAlign="center";ctx.fillText("해당 기간에 내역이 없어요",W/2,y+60);}
+      else{drawSection("💚 수입 내역",incList,"#10b981");drawSection("🔴 지출 내역",expList,"#ef4444");}
+      ctx.font="12px system-ui,sans-serif";ctx.fillStyle="#ccc";ctx.textAlign="center";ctx.fillText(`내보낸 날짜: ${new Date().toLocaleDateString("ko-KR")}`,W/2,canvas.height-14);
+      const link=document.createElement("a"); link.download=`가계부_${range.start}_${range.end}.jpg`; link.href=canvas.toDataURL("image/jpeg",0.92); link.click();
+    }
+
+    function CatManager({title,cats,setCats,newCat,setNewCat,color,excludedCats,toggleExclude,showExclude}){
+      const [open,setOpen]=useState(false);
+      const add=()=>{if(!newCat.trim()||cats.includes(newCat.trim()))return;setCats(p=>[...p,newCat.trim()]);setNewCat("");};
+      return(
+        <div style={{background:"#fff",border:"1px solid #e8e8e8",borderRadius:14,overflow:"hidden"}}>
+          <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",padding:"14px 16px",background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <span style={{fontWeight:700,fontSize:15}}>{title}</span>
+            <span style={{fontSize:13,color:"#aaa",display:"flex",alignItems:"center",gap:6}}>{cats.length}개<span style={{fontSize:18,transform:open?"rotate(180deg)":"rotate(0deg)",transition:"transform 0.2s",display:"inline-block"}}>⌄</span></span>
+          </button>
+          {open&&<div style={{padding:"0 16px 16px"}}>
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              <input type="text" placeholder="새 카테고리" value={newCat} onChange={e=>setNewCat(e.target.value)} onKeyDown={e=>e.key==="Enter"&&add()} style={{...inp,flex:1,marginBottom:0}}/>
+              <button onClick={add} style={{background:color,color:"#fff",border:"none",borderRadius:10,padding:"0 16px",fontWeight:700,cursor:"pointer",fontSize:20}}>+</button>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {cats.map(c=>{const isExc=excludedCats.includes(c);return(
+                <div key={c} style={{background:"#fafafa",border:"1px solid #f0f0f0",borderRadius:12,padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <span style={{fontSize:14,color:isExc?"#aaa":"#111",textDecoration:isExc?"line-through":"none"}}>{c}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    {showExclude&&<button onClick={()=>toggleExclude(c)} style={{background:isExc?"#f5f5f5":color+"22",color:isExc?"#aaa":color,border:`1px solid ${isExc?"#e0e0e0":color+"55"}`,borderRadius:20,padding:"3px 10px",fontSize:12,fontWeight:600,cursor:"pointer"}}>{isExc?"집계 제외 중":"집계 포함"}</button>}
+                    <button onClick={()=>setCats(p=>p.filter(x=>x!==c))} style={{background:"none",border:"none",color:"#ccc",cursor:"pointer",fontSize:18,lineHeight:1,padding:0}}>×</button>
+                  </div>
+                </div>
+              );})}
+            </div>
+          </div>}
+        </div>
+      );
+    }
+
+    function HomeList({entries, setEntries, excludedCats, expCats, incCats, period}){
+      const [filter,setFilter]=useState("all");
+      const [editTarget,setEditTarget]=useState(null);
+      const sorted=[...entries].filter(e=>(filter==="all"||e.type===filter)&&e.date>=period.start&&e.date<=period.end).sort((a,b)=>b.date.localeCompare(a.date));
+
+      const handleSave = updated => {
+        setEntries(p => p.map(e => e.id === updated.id ? updated : e));
+        setEditTarget(null);
+      };
+
+      return(<>
+        <div style={{display:"flex",background:"#f0f0f0",borderRadius:10,padding:3,marginBottom:14}}>
+          {[["all","전체"],["expense","지출"],["income","수입"]].map(([k,l])=>(
+            <button key={k} onClick={()=>setFilter(k)} style={{flex:1,padding:"8px 0",border:"none",borderRadius:8,background:filter===k?"#fff":"transparent",color:filter===k?"#6366f1":"#888",fontWeight:filter===k?700:400,fontSize:13,cursor:"pointer",boxShadow:filter===k?"0 1px 4px rgba(0,0,0,0.08)":"none"}}>{l}</button>
+          ))}
+        </div>
+        {sorted.length===0
+          ?<div style={{textAlign:"center",color:"#bbb",marginTop:60,fontSize:14}}><div style={{fontSize:36,marginBottom:12}}>📝</div>내역이 없어요<br/>입력 탭에서 추가해 보세요</div>
+          :<div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {sorted.map(e=>{const isExc=excludedCats.includes(e.category);return(
+              <div key={e.id} onClick={()=>setEditTarget(e)} style={{background:"#fff",borderRadius:12,padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",opacity:isExc?0.6:1,cursor:"pointer"}}>
+                <div>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,flexWrap:"wrap"}}>
+                    <span style={{background:e.type==="expense"?"#fff0f0":"#f0fff8",color:e.type==="expense"?"#ef4444":"#10b981",borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:600}}>{e.category}</span>
+                    {isExc&&<span style={{background:"#f5f5f5",color:"#aaa",borderRadius:6,padding:"2px 7px",fontSize:11}}>집계 제외</span>}
+                    <span style={{fontSize:12,color:"#aaa"}}>{e.date}</span>
+                  </div>
+                  {e.memo&&<div style={{fontSize:13,color:"#666"}}>{e.memo}</div>}
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontWeight:700,fontSize:16,color:isExc?"#aaa":e.type==="expense"?"#ef4444":"#10b981"}}>{e.type==="expense"?"-":"+"}{e.amount.toLocaleString("ko-KR")}원</span>
+                  <button onClick={ev=>{ev.stopPropagation();setEntries(p=>p.filter(x=>x.id!==e.id));}} style={{background:"none",border:"none",color:"#ccc",fontSize:18,cursor:"pointer",lineHeight:1}}>×</button>
+                </div>
+              </div>
+            );})}
+          </div>
+        }
+        {editTarget && <EditModal entry={editTarget} expCats={expCats} incCats={incCats} excludedCats={excludedCats} onSave={handleSave} onCancel={()=>setEditTarget(null)}/>}
+      </>);
+    }
+
+    function App(){
+      const [page,setPage]=useState("home");
+      const [addType,setAddType]=useState("expense");
+      const [period,setPeriod]=useState(()=>load("period",{start:today(),end:today()}));
+      const [expCats,setExpCats]=useState(()=>load("expCats",DEFAULT_EXP_CATS));
+      const [incCats,setIncCats]=useState(()=>load("incCats",DEFAULT_INC_CATS));
+      const [excludedCats,setExcludedCats]=useState(()=>load("excludedCats",[]));
+      const [entries,setEntries]=useState(()=>load("entries",[]));
+      const [form,setForm]=useState({date:today(),category:"",amount:"",memo:""});
+      const [newExpCat,setNewExpCat]=useState("");
+      const [newIncCat,setNewIncCat]=useState("");
+      const [budget,setBudget]=useState(()=>load("budget",""));
+      const [statsType,setStatsType]=useState("expense");
+      const [exportRange,setExportRange]=useState({start:today(),end:today()});
+      const [exporting,setExporting]=useState(false);
+      const [confirmData,setConfirmData]=useState(null); // 추가 확인 모달
+
+      useEffect(()=>save("period",period),[period]);
+      useEffect(()=>save("expCats",expCats),[expCats]);
+      useEffect(()=>save("incCats",incCats),[incCats]);
+      useEffect(()=>save("excludedCats",excludedCats),[excludedCats]);
+      useEffect(()=>save("entries",entries),[entries]);
+      useEffect(()=>save("budget",budget),[budget]);
+      useEffect(()=>setForm(f=>({...f,category:""})),[addType]);
+
+      const toggleExclude=c=>setExcludedCats(p=>p.includes(c)?p.filter(x=>x!==c):[...p,c]);
+
+      // 금액 입력 콤마 처리
+      const handleAmount = e => {
+        const raw = e.target.value.replace(/,/g,"");
+        if (raw === "" || /^\d+$/.test(raw)) setForm(f=>({...f, amount: fmtNum(raw)}));
+      };
+
+      const rawAmount = Number(String(form.amount).replace(/,/g,""));
+
+      const requestAdd = () => {
+        if (!form.category || !form.amount || isNaN(rawAmount) || rawAmount <= 0) return;
+        setConfirmData({ form, rawAmount });
+      };
+
+      const confirmAdd = () => {
+        const { form: f, rawAmount: amt } = confirmData;
+        setEntries(p=>[...p,{id:Date.now(),type:addType,...f,amount:amt}]);
+        setForm(f=>({...f,amount:"",memo:""}));
+        setConfirmData(null);
+      };
+
+      const periodEntries=entries.filter(e=>e.date>=period.start&&e.date<=period.end);
+      const counted=periodEntries.filter(e=>!excludedCats.includes(e.category));
+      const totalExp=counted.filter(e=>e.type==="expense").reduce((s,e)=>s+e.amount,0);
+      const totalInc=counted.filter(e=>e.type==="income").reduce((s,e)=>s+e.amount,0);
+      const balance=totalInc-totalExp;
+      const excTotal=periodEntries.filter(e=>excludedCats.includes(e.category)&&e.type==="expense").reduce((s,e)=>s+e.amount,0);
+      const cats=addType==="expense"?expCats:incCats;
+      const statsEntries=periodEntries.filter(e=>e.type===statsType&&!excludedCats.includes(e.category));
+      const statsTotal=statsEntries.reduce((s,e)=>s+e.amount,0);
+      const statsCats=(statsType==="expense"?expCats:incCats).filter(c=>!excludedCats.includes(c)).map((c,i)=>{
+        const sum=statsEntries.filter(e=>e.category===c).reduce((s,e)=>s+e.amount,0);
+        return{name:c,value:sum,color:COLORS[i%COLORS.length]};
+      }).filter(x=>x.value>0);
+
+      const handleExport=async()=>{
+        setExporting(true);
+        await new Promise(r=>setTimeout(r,100));
+        try{drawAndDownload(exportRange,entries,excludedCats);}catch(e){console.error(e);}
+        setExporting(false);
+      };
+
+      return(
+        <div style={{maxWidth:430,margin:"0 auto",minHeight:"100vh",background:"#fafafa"}}>
+          <div style={{background:"#fff",borderBottom:"1px solid #f0f0f0",padding:"16px 20px 0",position:"sticky",top:0,zIndex:10}}>
+            <div style={{fontSize:18,fontWeight:700,color:"#111",marginBottom:12}}>💰 가계부</div>
+            <div style={{display:"flex"}}>
+              {[["home","내역"],["add","입력"],["stats","통계"],["settings","설정"]].map(([k,l])=>(
+                <button key={k} onClick={()=>setPage(k)} style={{flex:1,padding:"10px 0",background:"none",border:"none",borderBottom:page===k?"2px solid #6366f1":"2px solid transparent",color:page===k?"#6366f1":"#888",fontWeight:page===k?700:400,fontSize:14,cursor:"pointer"}}>{l}</button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{padding:"20px 16px",paddingBottom:40}}>
+            {page==="home"&&(
+              <div>
+                <div style={{background:"#6366f1",borderRadius:16,padding:"18px 20px",marginBottom:16,color:"#fff"}}>
+                  <div style={{fontSize:12,opacity:0.8,marginBottom:4}}>정산 기간</div>
+                  <div style={{fontSize:14,fontWeight:600,marginBottom:14}}>{period.start} ~ {period.end}</div>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
+                    <div><div style={{fontSize:11,opacity:0.75,marginBottom:2}}>총 수입</div><div style={{fontSize:20,fontWeight:800}}>{fmt(totalInc)}</div></div>
+                    <div style={{textAlign:"right"}}><div style={{fontSize:11,opacity:0.75,marginBottom:2}}>총 지출</div><div style={{fontSize:20,fontWeight:800}}>{fmt(totalExp)}</div></div>
+                  </div>
+                  <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:excTotal>0?8:0}}>
+                    <span style={{fontSize:13}}>잔액</span>
+                    <span style={{fontWeight:800,fontSize:18,color:balance>=0?"#a7f3d0":"#fca5a5"}}>{balance>=0?"+":""}{fmt(balance)}</span>
+                  </div>
+                  {excTotal>0&&<div style={{background:"rgba(255,255,255,0.1)",borderRadius:10,padding:"8px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:budget?8:0}}><span style={{fontSize:12,opacity:0.8}}>집계 제외 금액</span><span style={{fontSize:13,opacity:0.9}}>{fmt(excTotal)}</span></div>}
+                  {budget&&<div style={{background:"rgba(255,255,255,0.1)",borderRadius:10,padding:"8px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,opacity:0.85}}>예산 대비 지출</span><span style={{fontWeight:700,fontSize:14,color:totalExp>Number(budget)?"#fca5a5":"#a7f3d0"}}>{fmt(totalExp)} / {fmt(Number(budget))}</span></div>}
+                </div>
+                <HomeList entries={entries} setEntries={setEntries} delEntry={id=>setEntries(p=>p.filter(e=>e.id!==id))} excludedCats={excludedCats} expCats={expCats} incCats={incCats} period={period}/>
+              </div>
+            )}
+
+            {page==="add"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                <div style={{fontWeight:700,fontSize:16,marginBottom:4}}>지출/수입 입력</div>
+                <div style={{display:"flex",background:"#f0f0f0",borderRadius:10,padding:3}}>
+                  {[["expense","지출"],["income","수입"]].map(([k,l])=>(
+                    <button key={k} onClick={()=>setAddType(k)} style={{flex:1,padding:"9px 0",border:"none",borderRadius:8,background:addType===k?"#fff":"transparent",color:addType===k?k==="expense"?"#ef4444":"#10b981":"#888",fontWeight:addType===k?700:400,fontSize:15,cursor:"pointer",boxShadow:addType===k?"0 1px 4px rgba(0,0,0,0.1)":"none"}}>{l}</button>
+                  ))}
+                </div>
+                <div><label style={lbl}>날짜</label><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/></div>
+                <div><label style={lbl}>카테고리</label>
+                  <select value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))} style={inp}>
+                    <option value="">선택하세요</option>
+                    {cats.map(c=><option key={c} value={c}>{c}{excludedCats.includes(c)?" (집계 제외)":""}</option>)}
+                  </select>
+                </div>
+                <div><label style={lbl}>금액 (원)</label>
+                  <input type="text" inputMode="numeric" placeholder="0" value={form.amount} onChange={handleAmount} style={inp}/>
+                  {rawAmount>0&&<div style={{fontSize:13,color:"#6366f1",marginTop:6,fontWeight:600}}>{fmt(rawAmount)}</div>}
+                </div>
+                <div><label style={lbl}>메모 (선택)</label><input type="text" placeholder="내용을 입력하세요" value={form.memo} onChange={e=>setForm(f=>({...f,memo:e.target.value}))} style={inp}/></div>
+                <button onClick={requestAdd} style={{background:addType==="expense"?"#ef4444":"#10b981",color:"#fff",border:"none",borderRadius:12,padding:"14px",fontWeight:700,fontSize:16,cursor:"pointer",marginTop:4}}>+ {addType==="expense"?"지출":"수입"} 추가</button>
+              </div>
+            )}
+
+            {page==="stats"&&(
+              <div>
+                <div style={{display:"flex",background:"#f0f0f0",borderRadius:10,padding:3,marginBottom:20}}>
+                  {[["expense","지출"],["income","수입"]].map(([k,l])=>(
+                    <button key={k} onClick={()=>setStatsType(k)} style={{flex:1,padding:"9px 0",border:"none",borderRadius:8,background:statsType===k?"#fff":"transparent",color:statsType===k?k==="expense"?"#ef4444":"#10b981":"#888",fontWeight:statsType===k?700:400,fontSize:15,cursor:"pointer",boxShadow:statsType===k?"0 1px 4px rgba(0,0,0,0.1)":"none"}}>{l}</button>
+                  ))}
+                </div>
+                {statsCats.length===0
+                  ?<div style={{textAlign:"center",color:"#bbb",marginTop:60,fontSize:14}}><div style={{fontSize:36,marginBottom:12}}>📊</div>집계된 내역이 없어요</div>
+                  :<div>
+                    <PieChart data={statsCats}/>
+                    <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:20}}>
+                      {[...statsCats].sort((a,b)=>b.value-a.value).map((c,i)=>(
+                        <div key={i} style={{background:"#fff",borderRadius:12,padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:10}}><div style={{width:12,height:12,borderRadius:"50%",background:c.color}}/><span style={{fontSize:14,fontWeight:500}}>{c.name}</span></div>
+                          <div style={{textAlign:"right"}}><div style={{fontWeight:700,fontSize:15}}>{fmt(c.value)}</div><div style={{fontSize:12,color:"#aaa"}}>{statsTotal>0?((c.value/statsTotal)*100).toFixed(1):0}%</div></div>
+                        </div>
+                      ))}
+                      <div style={{background:statsType==="expense"?"#fff0f0":"#f0fff8",borderRadius:12,padding:"12px 16px",display:"flex",justifyContent:"space-between",marginTop:4}}>
+                        <span style={{fontWeight:700,color:statsType==="expense"?"#ef4444":"#10b981"}}>총 {statsType==="expense"?"지출":"수입"}</span>
+                        <span style={{fontWeight:800,color:statsType==="expense"?"#ef4444":"#10b981",fontSize:16}}>{fmt(statsTotal)}</span>
+                      </div>
+                    </div>
+                  </div>
+                }
+              </div>
+            )}
+
+            {page==="settings"&&(
+              <div style={{display:"flex",flexDirection:"column",gap:16}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>📅 정산 기간</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    <div><label style={lbl}>시작일</label><input type="date" value={period.start} onChange={e=>setPeriod(p=>({...p,start:e.target.value}))} style={inp}/></div>
+                    <div><label style={lbl}>종료일</label><input type="date" value={period.end} onChange={e=>setPeriod(p=>({...p,end:e.target.value}))} style={inp}/></div>
+                  </div>
+                </div>
+                <div>
+                  <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>💵 지출 예산 (선택)</div>
+                  <input type="number" placeholder="이번 달 예산" value={budget} onChange={e=>setBudget(e.target.value)} style={inp}/>
+                </div>
+                <CatManager title="🏷️ 지출 카테고리" cats={expCats} setCats={setExpCats} newCat={newExpCat} setNewCat={setNewExpCat} color="#ef4444" excludedCats={excludedCats} toggleExclude={toggleExclude} showExclude={true}/>
+                <CatManager title="💚 수입 카테고리" cats={incCats} setCats={setIncCats} newCat={newIncCat} setNewCat={setNewIncCat} color="#10b981" excludedCats={excludedCats} toggleExclude={toggleExclude} showExclude={false}/>
+                <div style={{background:"#fff",border:"1px solid #e8e8e8",borderRadius:14,overflow:"hidden"}}>
+                  <div style={{padding:"14px 16px",borderBottom:"1px solid #f5f5f5"}}>
+                    <div style={{fontWeight:700,fontSize:15,marginBottom:2}}>📤 데이터 내보내기</div>
+                    <div style={{fontSize:12,color:"#aaa"}}>원하는 기간의 내역을 JPG 이미지로 저장해요</div>
+                  </div>
+                  <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
+                    <div><label style={lbl}>시작일</label><input type="date" value={exportRange.start} onChange={e=>setExportRange(r=>({...r,start:e.target.value}))} style={inp}/></div>
+                    <div><label style={lbl}>종료일</label><input type="date" value={exportRange.end} onChange={e=>setExportRange(r=>({...r,end:e.target.value}))} style={inp}/></div>
+                    <button onClick={handleExport} disabled={exporting} style={{background:exporting?"#ccc":"#6366f1",color:"#fff",border:"none",borderRadius:12,padding:"13px",fontWeight:700,fontSize:15,cursor:exporting?"not-allowed":"pointer",marginTop:4}}>{exporting?"저장 중...":"📥 JPG로 내보내기"}</button>
+                  </div>
+                </div>
+                <div style={{background:"#fff",border:"1px solid #e8e8e8",borderRadius:14,padding:"14px 16px"}}>
+                  <div style={{fontWeight:700,fontSize:15,marginBottom:8,color:"#ef4444"}}>⚠️ 데이터 초기화</div>
+                  <button onClick={()=>{if(window.confirm("모든 내역을 삭제할까요?"))setEntries([]);}} style={{background:"#fff",border:"1px solid #ef4444",color:"#ef4444",borderRadius:10,padding:"10px 20px",cursor:"pointer",fontWeight:600,fontSize:14}}>전체 내역 삭제</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 추가 확인 모달 */}
+          {confirmData&&(
+            <ConfirmModal
+              msg={`${confirmData.form.category}에\n${fmt(confirmData.rawAmount)}을 추가할까요?`}
+              confirmLabel="추가"
+              confirmColor={addType==="expense"?"#ef4444":"#10b981"}
+              onConfirm={confirmAdd}
+              onCancel={()=>setConfirmData(null)}
+            />
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>
